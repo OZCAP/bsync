@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
+	"sort"
 )
 
 // load config from toml
@@ -91,22 +93,30 @@ func loadProject(project string, cCtx *cli.Context, cfg Configuration) {
 	// fmt.Println("trees:", cfg.Trees, "project:", project)
 	projectStates := projectDetails.States
 	for _, state := range projectStates {
-		fmt.Printf("\npulling branch %s 🪵", state.Branch)
-
+		fmt.Printf("\npulling branch %s 🪵\n", state.Branch)
 		cmd := exec.Command("git", "checkout", state.Branch)
 		cmd.Dir = cfg.Repositories[state.Repo].Local
-
 		fmt.Printf("\033[F\033[2K") // move cursor up and clear line
 		_, err := cmd.Output()
 		if err != nil {
-			fmt.Printf("Error pulling branch %s ❌", state.Branch)
-			panic(err)
+			fmt.Printf("Error checking out branch %s (%s) ❌", state.Branch, state.Repo)
+			fmt.Println(err.Error())
 		} else {
-			fmt.Printf("Pulled branch %s (%s) ✅", state.Branch, state.Repo)
+			fmt.Printf("Checked out branch %s (%s) ✅\n", state.Branch, state.Repo)
+			fmt.Printf("Pulling branch %s (%s) 🪵\n", state.Branch, state.Repo)
+			pullCmd := exec.Command("git", "pull", "--ff-only", "origin", state.Branch)
+			pullCmd.Dir = cfg.Repositories[state.Repo].Local
+			_, err :=pullCmd.Output()
+			if err != nil {
+				fmt.Printf(err.Error())
+				fmt.Printf("\033[F\033[2KError pulling branch %s (%s) ❌\n", state.Branch, state.Repo)
+			} else {
+				fmt.Printf("\033[F\033[2KPulled branch %s (%s) ✅\n", state.Branch, state.Repo)
+			}
 		}
 		fmt.Println("")
 	}
-	fmt.Println("\033[2KLoaded tree", project, "🌳")
+	// fmt.Println("\033[2KLoaded tree", project, "🌳")
 }
 
 func saveConfigToml(cfg Configuration) {
@@ -288,12 +298,112 @@ func formatPRTitle(currentBranch string, destinationBranch string) string {
 	return prefix + " " + branchNameTitle
 }
 
-func openPullRequest(title string, destinationBranch string) {
-	cmd := exec.Command("gh", "pr", "create", "--title", title, "--body", "", "--base", destinationBranch)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	fmt.Println("\u001b[31mCreating pull request into branch " + destinationBranch + "...\u001b[0m" + "\n\u001b[34m - " + title + "\u001b")
-	cmd.Run()
-	fmt.Println()
-	return
+func openPullRequest(title string, destinationBranch string, body string) {
+    cmd := exec.Command("gh", "pr", "create", "--title", title, "--body", body, "--base", destinationBranch)
+    cmd.Stdout = os.Stdout
+    cmd.Stderr = os.Stderr
+    fmt.Println("\u001b[31mCreating pull request into branch " + destinationBranch + "...\u001b[0m" + "\n\u001b[34m - " + title + "\u001b")
+    cmd.Run()
+    fmt.Println()
+    return
+}
+
+type BranchTime struct {
+	Branch string
+	Time   time.Time
+}
+
+func listBranches() {
+	// grep a list of all branches in local git repo
+	// cmd := exec.Command("git", "branch", "--list")
+	// out, err := cmd.Output()
+	// if err != nil {
+	// 	panic(err)
+	// }
+
+	// output := string(out)
+
+	// // remove asterisk from output
+	// output = strings.ReplaceAll(output, "*", "")
+
+	// // split branches into array
+	// branches := strings.Split(string(out), "\n")
+
+	// for i, branch := range branches {
+	// 	branches[i] = strings.TrimSpace(branch)
+	// 	fmt.Println(i, branch)
+	// }
+allBranches := []string{}
+branchesWithTime := []BranchTime{}
+subDirs := []string{}
+	// list files in .git/refs/heads
+	items, err := os.ReadDir(".git/refs/heads")
+	if err != nil {
+		panic(err)
+	}
+
+	for _, item := range items {
+		// open dir if it is and add to list
+		if item.IsDir() {
+			subDirs = append(subDirs, item.Name())
+		}
+	}
+
+	for _, subDir := range subDirs {
+		items, err := os.ReadDir(".git/refs/heads/" + subDir)
+		if err != nil {
+			panic(err)
+		}
+
+		for _, item := range items {
+			allBranches = append(allBranches, subDir + "/" + item.Name())
+		}
+	}
+
+
+
+	for _, branch := range allBranches {
+		// sort branches by last commit date
+		cmd := exec.Command("git", "log", "-1", "--format=%cd", branch)
+		out, err := cmd.Output()
+		if err != nil {
+			panic(err)
+		}
+
+		// convert date to unix timestamp
+		date, err := time.Parse("Mon Jan 2 15:04:05 2006 -0700", string(out))
+		if err != nil {
+			panic(err)
+		}
+
+		fmt.Println(branch, date)
+
+		// add branch and time to array
+		branchesWithTime = append(branchesWithTime, BranchTime{
+			Branch: branch,
+			Time:   date,
+		})
+	}
+
+	fmt.Println(branchesWithTime)
+
+	// sort branches by time
+	sort.Slice(branchesWithTime, func(i, j int) bool {
+		return branchesWithTime[i].Time.After(branchesWithTime[j].Time)
+	})
+
+	// print branches
+	for _, branch := range branchesWithTime {
+		fmt.Println(branch.Branch)
+	}
+
+
+
+
+
+
+	// for _, file := range files {
+	// 	fmt.Println(file.Name())
+	// }
+
 }
